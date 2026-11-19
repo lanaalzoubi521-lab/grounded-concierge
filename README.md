@@ -1,6 +1,6 @@
 # Grounded Concierge
 
-**A bilingual ceramics store whose AI concierge can only say what the live catalogue says, and proves it on every reply.**
+**A bilingual ceramics store with an AI concierge that checks its replies against the live catalogue before the customer sees them.**
 
 [![Live demo](https://img.shields.io/badge/live_demo-open-B4532A?style=flat-square)](https://lanaalzoubi521-lab.github.io/grounded-concierge/) [![Tests](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml/badge.svg)](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml) ![All rights reserved](https://img.shields.io/badge/license-all_rights_reserved-555?style=flat-square) ![Node 18+](https://img.shields.io/badge/node-18%2B-555?style=flat-square) ![Zero dependencies](https://img.shields.io/badge/dependencies-0-555?style=flat-square)
 
