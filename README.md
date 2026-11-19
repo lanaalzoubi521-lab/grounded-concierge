@@ -2,7 +2,7 @@
 
 **A bilingual ceramics store whose AI concierge can only say what the live catalogue says, and proves it on every reply.**
 
-[![Live demo](https://img.shields.io/badge/live_demo-open-B4532A?style=flat-square)](https://lanaalzoubi521-lab.github.io/grounded-concierge/) [![Tests](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml/badge.svg)](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml) ![License: MIT](https://img.shields.io/badge/license-MIT-555?style=flat-square) ![Node 18+](https://img.shields.io/badge/node-18%2B-555?style=flat-square) ![Zero dependencies](https://img.shields.io/badge/dependencies-0-555?style=flat-square)
+[![Live demo](https://img.shields.io/badge/live_demo-open-B4532A?style=flat-square)](https://lanaalzoubi521-lab.github.io/grounded-concierge/) [![Tests](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml/badge.svg)](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml) ![All rights reserved](https://img.shields.io/badge/license-all_rights_reserved-555?style=flat-square) ![Node 18+](https://img.shields.io/badge/node-18%2B-555?style=flat-square) ![Zero dependencies](https://img.shields.io/badge/dependencies-0-555?style=flat-square)
 
 **[Open the live demo →](https://lanaalzoubi521-lab.github.io/grounded-concierge/)** A working store in English and Arabic. Nothing to install.
 
@@ -81,4 +81,4 @@ test/             node:test suite
 
 Lana Alzoubi · AI & Automation · [lanaalzoubi.com](https://lanaalzoubi.com)
 
-MIT License. Demo store: Raml Home is a fictional company. three.js is MIT licensed.
+© 2026 Lana Alzoubi. All rights reserved. The code is published for review; reuse needs written permission. See [LICENSE](LICENSE). Demo store: Raml Home is a fictional company.
