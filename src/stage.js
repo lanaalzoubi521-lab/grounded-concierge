@@ -77,20 +77,32 @@ export function hasWebGL() {
 // Fallback for devices without WebGL: the same profile, drawn as a shaded silhouette.
 export function silhouette(p, size = 520, bg = '#ECE8E0') {
   const g = GLAZES[p.glaze], H = p.h, R = Math.max(...p.profile.map(q => q[0]));
-  const sc = Math.min((size * 0.78) / H, (size * 0.42) / R), cx = size / 2, base = size * 0.89;
-  const pts = p.profile.map(([r, y]) => [r * sc, base - y * sc]);
+  const sc = Math.min((size * 0.7) / H, (size * 0.38) / R), cx = size / 2, base = size * 0.86;
+  const raw = p.profile.map(([r, y]) => [r * sc, base - y * sc]), pts = [];
+  for (let i = 0; i < raw.length - 1; i++) { // Catmull-Rom sampling so the outline is smooth, not faceted
+    const p0 = raw[i - 1] || raw[i], p1 = raw[i], p2 = raw[i + 1], p3 = raw[i + 2] || p2;
+    for (let k = 0; k < 8; k++) { const t = k / 8, t2 = t * t, t3 = t2 * t; pts.push([0, 1].map(j => 0.5 * ((2 * p1[j]) + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3))); }
+  }
+  pts.push(raw[raw.length - 1]);
   const right = pts.map(([x, y]) => `${(cx + x).toFixed(1)},${y.toFixed(1)}`).join(' L');
   const left = pts.slice().reverse().map(([x, y]) => `${(cx - x).toFixed(1)},${y.toFixed(1)}`).join(' L');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><defs><linearGradient id="s" x1="0" x2="1"><stop offset="0" stop-color="${g.color}" stop-opacity=".75"/><stop offset=".35" stop-color="${g.color}"/><stop offset=".7" stop-color="${g.color}" stop-opacity=".85"/><stop offset="1" stop-color="#000" stop-opacity=".35"/></linearGradient><radialGradient id="sh"><stop offset="0" stop-color="#14100c" stop-opacity=".35"/><stop offset="1" stop-color="#14100c" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${bg}"/><ellipse cx="${cx}" cy="${base + 4}" rx="${R * sc * 1.6}" ry="${R * sc * 0.28}" fill="url(#sh)"/><path d="M${right} L${left} Z" fill="url(#s)"/><path d="M${right} L${left} Z" fill="${g.color}" opacity=".35"/></svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
-export function createStage(canvas, { interactive = false, fit = 1, bg = null, shiftX = 0 } = {}) {
-  if (!hasWebGL()) {
-    const img = document.createElement('img'); img.className = canvas.className; img.alt = '';
+export function createStage(canvas, opts = {}) {
+  if (hasWebGL()) { try { return createGLStage(canvas, opts); } catch (e) { /* driver refused: fall through to the drawn version */ } }
+  return fallbackStage(canvas, opts);
+}
+function fallbackStage(canvas, { bg = null, shiftX = 0 } = {}) {
+  {
+    const img = document.createElement('img'); img.id = canvas.id; img.className = canvas.className; img.alt = '';
     img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block'; canvas.replaceWith(img);
+    if (shiftX) img.style.objectPosition = document.documentElement.dir === 'rtl' ? '15% 50%' : '85% 50%';
     return { show(p) { img.src = silhouette(p, 520, bg || '#ECE8E0'); img.alt = p.name.en; }, render() {}, resize() {}, play() {}, stop() {}, setAuto() {}, setAngle() {}, snapshot(p) { return silhouette(p, 520, bg || '#ECE8E0'); }, webgl: false };
   }
+}
+function createGLStage(canvas, { interactive = false, fit = 1, bg = null, shiftX = 0 } = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;

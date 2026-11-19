@@ -233,6 +233,7 @@ details p{margin-top:10px;color:#3B3934;font-size:15px;line-height:1.55}
   .stagecol{position:relative;top:0;height:auto}#big{height:52vh;flex:none}
   #pd-angles{position:static;margin-top:8px}
   .fab{inset-inline-end:16px;bottom:16px;padding:12px 16px}
+  #form{margin:0 20px 12px}#q{min-width:0;padding-inline-end:10px;font-size:15px}
 }
 
 </style>
@@ -474,6 +475,7 @@ function conciergeTools(trace, env = { attempts: {}, tickets: [] }) {
     { name: 'handoff_to_team', description: 'Create a request for the studio team when you cannot answer, the customer asks for a person, or wants something outside the rules (discounts, custom orders, complaints). Ask for a name and a phone or email first.',
       inputSchema: { type: 'object', properties: { name: { type: 'string' }, contact: { type: 'string' }, question: { type: 'string' } }, required: ['name', 'contact', 'question'] },
       execute: ({ name, contact, question }) => {
+        if (env.tickets.length >= 3) throw new Error('This conversation already opened the maximum number of requests. The team will reply to those.');
         const t = { id: 'T-' + String(1000 + env.tickets.length + 1), name: String(name).slice(0, 80), contact: String(contact).slice(0, 80), question: String(question).slice(0, 500), at: new Date().toISOString() };
         env.tickets.push(t); env.onTicket?.(t);
         return rec('handoff_to_team', {}, { created: true, ticket: t.id, replyWithin: 'one working day' });
@@ -497,29 +499,103 @@ Rules:
 - Two to five short sentences. No markdown, no lists unless comparing more than two products.`;
 }
 
-// Grounding check: every number and SKU in the reply must appear in this turn's tool results.
-function groundingCheck(reply, trace) {
-  const toArabicDigits = s => s.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d));
-  const text = toArabicDigits(reply);
-  const blob = JSON.stringify(trace.map(t => t.out));
-  const known = new Set((blob.match(/\d+(\.\d+)?/g) || []).map(Number));
-  const skus = [...new Set(text.match(/RH-[A-Z]{2}-\d{3}/g) || [])];
-  const facts = [];
-  for (const m of text.matchAll(/(?:AED\s?(\d[\d,]*))|(?:(\d[\d,]*)\s?(?:درهم|د\.إ|AED))/g)) facts.push(Number((m[1] || m[2]).replace(/,/g, '')));
-  for (const m of text.matchAll(/(\d+)\s?(?:in stock|left|pieces|available|قطع|قطعة|متوفر|متوفرة)/gi)) facts.push(Number(m[1]));
-  const badSku = skus.filter(s => !blob.includes(s));
-  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s?(?:%|٪|percent|بالمئة|في المئة)/gi)) facts.push(Number(m[1]));
-  const badFacts = facts.filter(n => !known.has(n));
-  const lowerBlob = blob.toLowerCase();
-  const promises = (text.match(/\b(discount|coupon|promo code|voucher|free gift|price match|refund guaranteed)\b|خصم|كوبون|قسيمة|هدية مجانية|كود/gi) || []).filter(w => !lowerBlob.includes(w.toLowerCase()));
-  return { stock: trace.some(t => t.name === 'search_products' || t.name === 'get_product'), skus: skus.filter(s => !badSku.includes(s)), checked: facts.length + skus.length, failed: badFacts.length + badSku.length + promises.length, badFacts, badSku, promises, tools: trace.length };
+// Grounding check. Every price, stock count, size, percentage and SKU in a reply is tied to the
+// product it is said about (same sentence) and compared with what the tools returned in this turn.
+// Promise words (discounts, coupons, gifts, half price...) are flagged unless negated.
+// Returns exact character spans so the page can remove precisely what failed.
+const DIGITS = { '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9', '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9' };
+const toLatin = s => s.replace(/[٠-٩۰-۹]/g, d => DIGITS[d]); // one char for one char: offsets stay valid
+const EMIRATE_WORDS = { DXB: /\b(dubai|dxb)\b|دبي/i, AUH: /\b(abu dhabi|auh)\b|أبوظبي|ابوظبي|أبو ظبي/i, SHJ: /\b(sharjah|shj)\b|الشارقة|شارقة/i };
+const CUR = '(?:aed|dhs?\\.?|dirhams?|د\\.إ|درهم|دراهم)';
+const NUM = '(\\d[\\d,]*(?:\\.\\d+)?)';
+const num = v => Number(String(v).replace(/,/g, ''));
+const NEG = /(\b(no|not|never|can't|cannot|can not|unable to|don't|do not|isn't|aren't|won't|without)\b|لا |ليس|لن |غير |لا يوجد|لا أستطيع|لا يمكن)[^.?!؟]{0,40}$/i;
+
+function groundingCheck(reply, trace, userText = '') {
+  const text = toLatin(String(reply));
+  const user = toLatin(String(userText));
+  const products = new Map();
+  const policyNums = new Set(), extraNums = new Set();
+  let policyTopics = new Set();
+  const addNums = (set, s) => { for (const m of String(s).matchAll(/\d[\d,]*(?:\.\d+)?/g)) set.add(num(m[0])); };
+  for (const t of trace) {
+    const out = t.out || {};
+    const list = Array.isArray(out) ? out : out.results ? out.results : out.sku ? [out] : [];
+    for (const p of list) if (p && p.sku) products.set(p.sku, p);
+    if (t.name === 'get_policy') { policyTopics.add(out.topic); addNums(policyNums, (out.en || '') + ' ' + (out.ar || '')); }
+    if (t.name === 'get_order_status' && out.ok) addNums(extraNums, JSON.stringify(out.order));
+    if (Array.isArray(out)) for (const o of out) if (o && !o.sku) addNums(extraNums, JSON.stringify(o));
+  }
+  addNums(extraNums, user); // numbers the customer said themselves ("under AED 300")
+  const allPrices = new Set([...products.values()].map(p => p.priceAED ?? p.price));
+  const sizeNums = sku => { const set = new Set(); const ps = sku ? [products.get(sku)] : [...products.values()]; for (const p of ps) if (p) { set.add(p.heightCm ?? p.h); addNums(set, p.description || ''); } return set; };
+  const stockVals = (sku, em) => { const ps = sku ? [products.get(sku)] : [...products.values()]; const out = new Set(); for (const p of ps) { const st = p?.stockByEmirate || p?.stock; if (!st) continue; if (em) out.add(st[em]); else { Object.values(st).forEach(v => out.add(v)); out.add(Object.values(st).reduce((a, b) => a + b, 0)); } } return out; };
+
+  // sentences with offsets
+  const sentences = []; let start = 0;
+  for (const m of text.matchAll(/[.!?؟\n]+(\s|$)/g)) { sentences.push([start, m.index + m[0].length]); start = m.index + m[0].length; }
+  if (start < text.length) sentences.push([start, text.length]);
+  const sentenceAt = i => sentences.find(([a, b]) => i >= a && i < b) || [0, text.length];
+  const skuIn = (a, b) => [...text.slice(a, b).matchAll(/\b(rh-[a-z]{2}-\d{3})(?!\d)/gi)].map(m => m[1].toUpperCase()).filter(s => products.has(s));
+  const emIn = (a, b) => Object.keys(EMIRATE_WORDS).filter(k => EMIRATE_WORDS[k].test(text.slice(a, b)));
+
+  const spans = [], badFacts = [], badSku = [], promises = [];
+  let checked = 0;
+  const taken = [];
+  const overlaps = (a, b) => taken.some(([x, y]) => a < y && b > x);
+  const fail = (a, b, v) => { spans.push([a, b]); badFacts.push(v); };
+  const visit = (re, fn) => { for (const m of text.matchAll(re)) { const a = m.index, b = a + m[0].length; if (overlaps(a, b)) continue; taken.push([a, b]); checked++; fn(m, a, b); } };
+
+  // SKUs
+  visit(/\b(rh-[a-z]{2}-\d{3,})\b/gi, (m, a, b) => { const s = m[1].toUpperCase(); if (!products.has(s)) { spans.push([a, b]); badSku.push(s); } });
+  // Prices
+  const checkPrice = (m, a, b) => {
+    const v = num(m[1]); const [sa, sb] = sentenceAt(a); const skus = skuIn(sa, sb);
+    const ok = (skus.length ? skus.some(s => (products.get(s).priceAED ?? products.get(s).price) === v) : allPrices.has(v)) || policyNums.has(v) || extraNums.has(v);
+    if (!ok) fail(a, b, v);
+  };
+  visit(new RegExp(CUR + '\\s*' + NUM, 'gi'), checkPrice);
+  visit(new RegExp(NUM + '\\s*' + CUR, 'gi'), checkPrice);
+  // Amounts in words next to a currency cannot be verified
+  visit(new RegExp('\\b(one|two|three|four|five|six|seven|eight|nine|ten|twenty|thirty|forty|fifty|hundred|thousand)\\b[\\w\\s-]{0,20}' + CUR + '|(مئة|مائة|مية|ألف|الف|مئتين|خمسين|عشرين)\\s*' + CUR, 'gi'), (m, a, b) => fail(a, b, m[0]));
+  // Percentages
+  visit(/(\d[\d,]*(?:\.\d+)?)\s*(?:%|٪|percent\b|per cent\b|بالمئة|في المئة)/gi, (m, a, b) => { const v = num(m[1]); if (!policyNums.has(v) && !extraNums.has(v)) fail(a, b, v); });
+  // Sizes
+  visit(/(\d+(?:\.\d+)?)\s*(?:cm\b|centimet(?:er|re)s?\b|سم|ml\b|مل\b|litres?\b|liters?\b|لتر)/gi, (m, a, b) => { const [sa, sb] = sentenceAt(a); const skus = skuIn(sa, sb); const v = num(m[1]); const ok = skus.length ? skus.some(s => sizeNums(s).has(v)) : sizeNums(null).has(v); if (!ok && !extraNums.has(v)) fail(a, b, v); });
+  // Stock counts
+  const checkStock = (m, a, b) => {
+    const v = num(m[1] || m[2]); const [sa, sb] = sentenceAt(a); const skus = skuIn(sa, sb); const ems = emIn(sa, sb);
+    const pool = skus.length ? skus : products.size === 1 ? [...products.keys()] : [null];
+    const ok = pool.some(s => (ems.length ? ems : [null]).some(e => stockVals(s, e).has(v))) || extraNums.has(v);
+    if (!ok) fail(a, b, v);
+  };
+  visit(/(\d+)\s*(?:pieces?|units?|items?|قطع|قطعة)?\s*(?:in stock|left|remaining|available|متوفرة|متوفر|متبقية|متبقي)/gi, checkStock);
+  visit(/(?:only|just|بقي|بقيت|يتبقى)\s+(\d+)\b/gi, checkStock);
+  // Promises
+  const PROMISE = /\b(discount(?:s|ed)?|coupons?|promo(?:tion(?:al)?)?\s?codes?|vouchers?|gifts?|price[-\s]match(?:ing)?|half[-\s]price|special offers?|buy one get one|bogo|cash\s?back|percent off|on sale|sale price)\b|خصم|خصومات|تخفيض|تخفيضات|كوبون|قسيمة|هدية|هدايا|عرض خاص|نصف السعر|كود خصم/gi;
+  for (const m of text.matchAll(PROMISE)) { if (NEG.test(text.slice(Math.max(0, m.index - 60), m.index))) continue; checked++; promises.push(m[0]); spans.push([m.index, m.index + m[0].length]); }
+  for (const m of text.matchAll(/\bfree\b|مجان(?:ي|ا|ًا)?/gi)) {
+    const [sa, sb] = sentenceAt(m.index), sent = text.slice(sa, sb);
+    const policyOk = (policyTopics.has('delivery') || policyTopics.has('pickup')) && /deliver|shipping|pickup|pick up|collect|توصيل|شحن|استلام/i.test(sent);
+    if (policyOk || NEG.test(text.slice(Math.max(0, m.index - 60), m.index))) continue;
+    checked++; promises.push(m[0]); spans.push([m.index, m.index + m[0].length]);
+  }
+  return { stock: trace.some(t => t.name === 'search_products' || t.name === 'get_product'), skus: [...new Set(skuIn(0, text.length))], checked, failed: badFacts.length + badSku.length + promises.length, badFacts, badSku, promises, spans, tools: trace.length };
+}
+
+// Removes exactly the failed spans from the reply.
+function redactSpans(reply, spans) {
+  let out = String(reply);
+  for (const [a, b] of [...spans].sort((x, y) => y[0] - x[0])) out = out.slice(0, a) + '…' + out.slice(b);
+  return out;
 }
 
 // Offline responder: same retrieval, no language model. Used where the page runs outside Claude.
 const offlineAttempts = {};
 function offlineAnswer(q, lang) {
   const s = q.toLowerCase();
-  const find = (dict, key = 'words') => Object.entries(dict).find(([, v]) => (v[key] || [v.en.toLowerCase(), v.ar]).some(w => s.includes(String(w).toLowerCase())))?.[0];
+  const has = w => /[a-z]/i.test(w) ? new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(s) : s.includes(w);
+  const find = dict => Object.entries(dict).find(([, v]) => v.words.some(w => has(String(w).toLowerCase())))?.[0];
   const kind = find(KINDS);
   const glaze = Object.entries(GLAZES).find(([k, v]) => s.includes(k) || s.includes(v.en.toLowerCase()) || s.includes(v.ar))?.[0];
   const emirate = Object.entries(EMIRATES).find(([k, v]) => s.includes(k.toLowerCase()) || s.includes(v.en.toLowerCase()) || s.includes(v.ar))?.[0];
@@ -527,7 +603,7 @@ function offlineAnswer(q, lang) {
   const ar = lang === 'ar';
   const trace = [];
   const ord = s.match(/rh-?\s?(\d{4})/i);
-  if (ord || /order|طلب/.test(s)) {
+  if (ord || /\b(my order|order status|where is (?:my )?order|track(?:ing)? (?:my )?order)\b|طلبي|حالة الطلب|وين طلبي|أين طلبي|تتبع الطلب/.test(s)) {
     const four = (s.replace(/rh-?\s?\d{4}/i, '').match(/\b(\d{4})\b/) || [])[1];
     if (!ord || !four) return { text: ar ? 'لمعرفة حالة طلبك، أرسل رقم الطلب (مثل RH-4102) وآخر أربعة أرقام من رقم الهاتف المسجل.' : 'To check an order, send the order number (like RH-4102) and the last four digits of the phone number on it.', trace };
     const r = lookupOrder('RH-' + ord[1], four, offlineAttempts);
@@ -538,7 +614,7 @@ function offlineAnswer(q, lang) {
   }
   if (/discount|coupon|cheaper|خصم|كوبون|ارخص|أرخص/.test(s)) return { text: ar ? 'لا أستطيع تقديم خصومات. يمكنني تحويل طلبك إلى فريق الاستوديو.' : "I can't offer discounts. I can pass your request to the studio team.", trace, handoff: true };
   for (const [topic, words] of Object.entries({ delivery: ['deliver', 'shipping', 'توصيل', 'شحن'], returns: ['return', 'refund', 'إرجاع', 'ارجاع', 'استرجاع'], pickup: ['pickup', 'pick up', 'collect', 'استلام'], care: ['dishwasher', 'food safe', 'care', 'غسالة', 'آمن', 'تنظيف'] })) {
-    if (words.some(w => s.includes(w))) { trace.push({ name: 'get_policy', out: POLICIES[topic] }); return { text: POLICIES[topic][ar ? 'ar' : 'en'], trace }; }
+    if (words.some(w => s.includes(w))) { trace.push({ name: 'get_policy', out: { topic, ...POLICIES[topic] } }); return { text: POLICIES[topic][ar ? 'ar' : 'en'], trace }; }
   }
   if (!kind && !glaze && !price) return { text: ar ? 'أستطيع المساعدة في القطع والأسعار والمخزون والتوصيل. جرب مثلا: مزهرية تحت 300 درهم متوفرة في دبي.' : 'I can help with pieces, prices, stock and delivery. Try: a vase under AED 300 in stock in Dubai.', trace };
   const res = searchProducts({ kind, glaze, maxPrice: price ? Number(price[1]) : undefined, emirate, inStockOnly: !!emirate });
@@ -634,20 +710,32 @@ function hasWebGL() {
 // Fallback for devices without WebGL: the same profile, drawn as a shaded silhouette.
 function silhouette(p, size = 520, bg = '#ECE8E0') {
   const g = GLAZES[p.glaze], H = p.h, R = Math.max(...p.profile.map(q => q[0]));
-  const sc = Math.min((size * 0.78) / H, (size * 0.42) / R), cx = size / 2, base = size * 0.89;
-  const pts = p.profile.map(([r, y]) => [r * sc, base - y * sc]);
+  const sc = Math.min((size * 0.7) / H, (size * 0.38) / R), cx = size / 2, base = size * 0.86;
+  const raw = p.profile.map(([r, y]) => [r * sc, base - y * sc]), pts = [];
+  for (let i = 0; i < raw.length - 1; i++) { // Catmull-Rom sampling so the outline is smooth, not faceted
+    const p0 = raw[i - 1] || raw[i], p1 = raw[i], p2 = raw[i + 1], p3 = raw[i + 2] || p2;
+    for (let k = 0; k < 8; k++) { const t = k / 8, t2 = t * t, t3 = t2 * t; pts.push([0, 1].map(j => 0.5 * ((2 * p1[j]) + (-p0[j] + p2[j]) * t + (2 * p0[j] - 5 * p1[j] + 4 * p2[j] - p3[j]) * t2 + (-p0[j] + 3 * p1[j] - 3 * p2[j] + p3[j]) * t3))); }
+  }
+  pts.push(raw[raw.length - 1]);
   const right = pts.map(([x, y]) => `${(cx + x).toFixed(1)},${y.toFixed(1)}`).join(' L');
   const left = pts.slice().reverse().map(([x, y]) => `${(cx - x).toFixed(1)},${y.toFixed(1)}`).join(' L');
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><defs><linearGradient id="s" x1="0" x2="1"><stop offset="0" stop-color="${g.color}" stop-opacity=".75"/><stop offset=".35" stop-color="${g.color}"/><stop offset=".7" stop-color="${g.color}" stop-opacity=".85"/><stop offset="1" stop-color="#000" stop-opacity=".35"/></linearGradient><radialGradient id="sh"><stop offset="0" stop-color="#14100c" stop-opacity=".35"/><stop offset="1" stop-color="#14100c" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${bg}"/><ellipse cx="${cx}" cy="${base + 4}" rx="${R * sc * 1.6}" ry="${R * sc * 0.28}" fill="url(#sh)"/><path d="M${right} L${left} Z" fill="url(#s)"/><path d="M${right} L${left} Z" fill="${g.color}" opacity=".35"/></svg>`;
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
-function createStage(canvas, { interactive = false, fit = 1, bg = null, shiftX = 0 } = {}) {
-  if (!hasWebGL()) {
-    const img = document.createElement('img'); img.className = canvas.className; img.alt = '';
+function createStage(canvas, opts = {}) {
+  if (hasWebGL()) { try { return createGLStage(canvas, opts); } catch (e) { /* driver refused: fall through to the drawn version */ } }
+  return fallbackStage(canvas, opts);
+}
+function fallbackStage(canvas, { bg = null, shiftX = 0 } = {}) {
+  {
+    const img = document.createElement('img'); img.id = canvas.id; img.className = canvas.className; img.alt = '';
     img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block'; canvas.replaceWith(img);
+    if (shiftX) img.style.objectPosition = document.documentElement.dir === 'rtl' ? '15% 50%' : '85% 50%';
     return { show(p) { img.src = silhouette(p, 520, bg || '#ECE8E0'); img.alt = p.name.en; }, render() {}, resize() {}, play() {}, stop() {}, setAuto() {}, setAngle() {}, snapshot(p) { return silhouette(p, 520, bg || '#ECE8E0'); }, webgl: false };
   }
+}
+function createGLStage(canvas, { interactive = false, fit = 1, bg = null, shiftX = 0 } = {}) {
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
@@ -737,7 +825,7 @@ const T = {
     empty: 'سلتك فارغة.', subtotal: 'المجموع الفرعي', deliveryFee: 'التوصيل', free: 'مجاني', total: 'المجموع', checkout: 'الدفع غير متاح في هذا المتجر التجريبي.', remove: 'إزالة',
     inbox: 'صندوق الاستوديو', inboxSub: 'الطلبات التي حولها المساعد إلى الفريق. في التشغيل الفعلي تذهب إلى نظام CRM أو واتساب.', noTickets: 'لا توجد طلبات بعد.', demo: 'متجر تجريبي. رمل هوم شركة غير حقيقية.', close: 'إغلاق', back: 'رجوع' },
 };
-const S = { lang: 'en', f: { kinds: new Set(), glazes: new Set(), price: null, em: null }, sort: 'featured', em: 'DXB', bag: {}, turns: [], thumbs: {}, angles: {}, sample: null, busy: false, sent: [], env: { attempts: {}, tickets: [] }, q: '' };
+const S = { userMsgs: 0, lang: 'en', f: { kinds: new Set(), glazes: new Set(), price: null, em: null }, sort: 'featured', em: 'DXB', bag: {}, turns: [], thumbs: {}, angles: {}, sample: null, busy: false, sent: [], env: { attempts: {}, tickets: [] }, q: '' };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const t = () => T[S.lang];
@@ -770,7 +858,7 @@ const tile = (p, i = 0) => `<a class="tile" href="#p-${p.sku}" style="--d:${i * 
 function route() {
   const h = location.hash.slice(1);
   if (h.startsWith('p-') && P(h.slice(2))) return show('product', h.slice(2));
-  if (h.startsWith('shop')) { const k = h.split('-')[1]; if (k && KINDS[k]) { S.f.kinds = new Set([k]); } else if (h === 'shop') S.f.kinds = new Set(); return show('shop'); }
+  if (h.startsWith('shop')) { const k = h.split('-')[1]; if (k && Object.hasOwn(KINDS, k)) { S.f.kinds = new Set([k]); } else if (h === 'shop') S.f.kinds = new Set(); return show('shop'); }
   if (h === 'inbox') return show('inbox');
   show('home');
 }
@@ -887,7 +975,7 @@ function wireHuman() { document.querySelectorAll('[data-human]').forEach(b => b.
 
 function rateOk() {
   const now = Date.now(); S.sent = S.sent.filter(x => now - x < 60000);
-  if (S.turns.length >= 60) return t().cap;
+  if (S.userMsgs >= 40) return t().cap;
   if (S.sent.length >= 8) return t().slow;
   S.sent.push(now); return null;
 }
@@ -895,25 +983,23 @@ function rateOk() {
 async function ask(q) {
   q = String(q).trim().slice(0, 600); if (!q || S.busy) return;
   const limit = rateOk(); if (limit) { bubble('bot', `<p>${esc(limit)}</p><button class="link sm" data-human>${t().human}</button>`); wireHuman(); return; }
-  S.busy = true; $('#q').value = ''; $('#tries').style.display = 'none';
+  S.busy = true; S.userMsgs++; $('#q').value = ''; $('#tries').style.display = 'none';
   bubble('me', `<p>${esc(q)}</p>`);
   const out = bubble('bot', `<p class="wait">${t().thinking}</p>`);
   if (!S.sample) {
     const r = offlineAnswer(q, S.lang);
-    setTimeout(() => { out.innerHTML = renderReply(r.text, groundingCheck(r.text, r.trace), r.handoff); wireHuman(); S.busy = false; $('#msgs').scrollTop = 1e9; }, 300);
+    setTimeout(() => { const g = groundingCheck(r.text, r.trace, q); out.innerHTML = renderReply(redactSpans(r.text, g.spans), g, r.handoff); wireHuman(); S.busy = false; $('#msgs').scrollTop = 1e9; }, 300);
     return;
   }
   const trace = [];
   S.turns.push({ role: 'user', content: q });
+  const steps = { search_products: ['Searching the catalogue', 'البحث في الكتالوج'], get_product: ['Checking a piece', 'التحقق من قطعة'], get_policy: ['Reading the store policy', 'قراءة سياسة المتجر'], get_order_status: ['Verifying the order', 'التحقق من الطلب'], handoff_to_team: ['Opening a request for the team', 'فتح طلب للفريق'] };
+  const tools = conciergeTools(trace, S.env).map(tl => ({ ...tl, execute: (input, c) => { out.querySelector('.wait').textContent = steps[tl.name]?.[S.lang === 'ar' ? 1 : 0] + '…'; return tl.execute(input, c); } }));
   try {
-    const { text } = await S.sample([{ role: 'user', content: conciergeRules(S.lang) }, ...S.turns.slice(-10)], {
-      tools: conciergeTools(trace, S.env),
-      onText: ({ text }) => { out.innerHTML = `<p>${esc(text.replace(/\s*\[RH-[A-Z]{2}-\d{3}\]/g, ''))}</p>`; $('#msgs').scrollTop = 1e9; },
-    });
-    const check = groundingCheck(text, trace);
-    let shown = text;
-    if (check.promises.length) shown = S.lang === 'ar' ? 'لا أستطيع تقديم هذا العرض. يمكنني تحويل طلبك إلى فريق الاستوديو.' : "I can't offer that. I can pass your request to the studio team.";
-    else for (const n of check.badFacts) shown = shown.replace(new RegExp(`(AED\\s?)?\\b${n}\\b(\\s?(درهم|%|٪))?`, 'g'), '…');
+    // Nothing is shown until the full reply has passed the grounding check.
+    const { text } = await S.sample([{ role: 'user', content: conciergeRules(S.lang) }, ...S.turns.slice(-10)], { tools });
+    const check = groundingCheck(text, trace, q);
+    const shown = check.promises.length ? (S.lang === 'ar' ? 'لا أستطيع تقديم هذا العرض. يمكنني تحويل طلبك إلى فريق الاستوديو.' : "I can't offer that. I can pass your request to the studio team.") : redactSpans(text, check.spans);
     out.innerHTML = renderReply(shown, check, check.promises.length || /studio team|فريق الاستوديو/.test(shown));
     wireHuman();
     S.turns.push({ role: 'assistant', content: shown });

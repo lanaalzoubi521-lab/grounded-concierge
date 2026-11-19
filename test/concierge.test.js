@@ -69,3 +69,59 @@ test('offline order flow verifies before answering', () => {
   assert.match(offlineAnswer('order RH-4101 phone 4417', 'en').text, /Delivered/);
   assert.match(offlineAnswer('order RH-4102 phone 1111', 'en').text, /could not verify/);
 });
+
+import { redactSpans } from '../src/concierge.js';
+const look = (...skus) => { const tr = []; const tools = conciergeTools(tr); for (const s of skus) tools[1].execute({ sku: s }); return tr; };
+test('price must belong to the product it is said about', () => {
+  const tr = look('RH-VS-101', 'RH-VS-103');
+  assert.equal(groundingCheck('The Dune vase, tall [RH-VS-101] is AED 95.', tr).failed, 1); // 95 is the bud vase price
+  assert.equal(groundingCheck('The Dune vase, tall [RH-VS-101] is AED 240.', tr).failed, 0);
+});
+test('stock must match the emirate named', () => {
+  const tr = look('RH-VS-101');
+  assert.equal(groundingCheck('Dune vase [RH-VS-101]: 6 in stock in Sharjah.', tr).failed, 1);
+  assert.equal(groundingCheck('Dune vase [RH-VS-101]: 6 in stock in Dubai.', tr).failed, 0);
+  assert.equal(groundingCheck('Only 9 left of the Dune vase [RH-VS-101].', tr).failed, 1);
+});
+test('currency formats the old check missed', () => {
+  const tr = look('RH-VS-101');
+  for (const r of ['It is aed 199.', 'It costs 199 dirhams.', 'Dhs 199 only.', 'Price: AED 2,400.', 'السعر ٢٤٠٠ درهم.', 'It is two hundred dirhams.', 'السعر ۱۹۹ درهم.'])
+    assert.ok(groundingCheck(r, tr).failed >= 1, r);
+  assert.equal(groundingCheck('السعر ٢٤٠ درهم [RH-VS-101].', tr).failed, 0);
+});
+test('decimals, long SKUs and lowercase SKUs are not misread', () => {
+  const tr = look('RH-VS-101');
+  assert.equal(groundingCheck('It is AED 240.99 [RH-VS-101].', tr).failed, 1);
+  assert.equal(groundingCheck('See [RH-VS-1019].', tr).failed, 1);
+  assert.equal(groundingCheck('See rh-vs-999.', tr).failed, 1);
+});
+test('promise wording, plural and Arabic', () => {
+  const tr = look('RH-VS-101');
+  for (const r of ['These are discounted today.', 'Half price this week!', 'Buy one get one free.', 'A special offer for you.', 'يوجد تخفيض اليوم.', 'عرض خاص لك.', 'نصف السعر.']) assert.ok(groundingCheck(r, tr).promises.length >= 1, r);
+});
+test('refusals and policy wording are not flagged', () => {
+  const tr = look('RH-VS-101');
+  assert.equal(groundingCheck("I can't offer a discount, but the studio team can help.", tr).failed, 0);
+  assert.equal(groundingCheck('لا أستطيع تقديم خصم.', tr).failed, 0);
+  const tp = []; conciergeTools(tp)[2].execute({ topic: 'delivery' });
+  assert.equal(groundingCheck('Delivery is free on orders over AED 500.', tp).failed, 0);
+  assert.equal(groundingCheck('You get a free vase with this order.', tr).failed, 1);
+});
+test("the customer's own numbers are allowed", () => {
+  const tr = []; conciergeTools(tr)[0].execute({ kind: 'vase', maxPrice: 300 });
+  assert.equal(groundingCheck('Here is what we have under AED 300: Dune vase, tall [RH-VS-101] at AED 240.', tr, 'A vase under AED 300 in Abu Dhabi').failed, 0);
+});
+test('dates and SKU digits are not accepted as prices; sizes are checked', () => {
+  const tr = look('RH-VS-101');
+  assert.equal(groundingCheck('It is AED 101.', tr).failed, 1);
+  assert.equal(groundingCheck('It is AED 2026.', tr).failed, 1);
+  assert.equal(groundingCheck('The Dune vase [RH-VS-101] is 42 cm tall.', tr).failed, 0);
+  assert.equal(groundingCheck('The Dune vase [RH-VS-101] is 55 cm tall.', tr).failed, 1);
+});
+test('failed spans are removed exactly, including Arabic digits', () => {
+  const tr = look('RH-VS-101');
+  for (const r of ['السعر ٢٤٠٠ درهم.', 'Price: AED 2,400 today.']) {
+    const g = groundingCheck(r, tr); const out = redactSpans(r, g.spans);
+    assert.ok(!/2,?400|٢٤٠٠/.test(out), out);
+  }
+});

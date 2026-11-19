@@ -29,7 +29,7 @@ Inside Claude, the concierge runs on the viewer's own Claude account with five t
 | `get_order_status` | Order status, released only when the order number and the last four phone digits both match |
 | `handoff_to_team` | Opens a request for the studio team, shown in the Studio inbox |
 
-**Grounding check** (`groundingCheck` in `src/concierge.js`): after each reply, every AED amount, stock count, percentage and SKU is matched against that turn's tool results, in English and Arabic numerals, and discount or coupon promises are flagged. Unverified details are removed before display, and each reply shows how many facts were checked against how many lookups.
+**Grounding check** (`groundingCheck` in `src/concierge.js`): every price, stock count, size, percentage and SKU in a reply is tied to the product named in the same sentence and compared with that turn's tool results, in Latin, Arabic and Persian digits. Promise words (discounts, coupons, gifts, half price) are flagged unless negated. The reply is shown only after it passes; failed details are removed at their exact position, and each reply shows how many facts were checked against how many lookups.
 
 **Handoff.** When the concierge cannot help, or a customer asks for a person, it collects a name, contact and question and opens a request. The demo shows these in a Studio inbox; in production they would go to a CRM or WhatsApp.
 
@@ -40,7 +40,7 @@ Outside Claude (for example on GitHub Pages) the page uses a catalogue search mo
 No dependencies. Node 18 or later.
 
 ```bash
-npm test          # 13 tests: retrieval, tools, grounding in English and Arabic, promise guard, order verification and lockout, handoff
+npm test          # 22 tests: retrieval, tools, grounding in English and Arabic, promise guard, order verification and lockout, handoff
 npm run build     # writes dist/index.html, one self-contained file including three.js and fonts
 ```
 

@@ -39,7 +39,7 @@ const T = {
     empty: 'سلتك فارغة.', subtotal: 'المجموع الفرعي', deliveryFee: 'التوصيل', free: 'مجاني', total: 'المجموع', checkout: 'الدفع غير متاح في هذا المتجر التجريبي.', remove: 'إزالة',
     inbox: 'صندوق الاستوديو', inboxSub: 'الطلبات التي حولها المساعد إلى الفريق. في التشغيل الفعلي تذهب إلى نظام CRM أو واتساب.', noTickets: 'لا توجد طلبات بعد.', demo: 'متجر تجريبي. رمل هوم شركة غير حقيقية.', close: 'إغلاق', back: 'رجوع' },
 };
-const S = { lang: 'en', f: { kinds: new Set(), glazes: new Set(), price: null, em: null }, sort: 'featured', em: 'DXB', bag: {}, turns: [], thumbs: {}, angles: {}, sample: null, busy: false, sent: [], env: { attempts: {}, tickets: [] }, q: '' };
+const S = { userMsgs: 0, lang: 'en', f: { kinds: new Set(), glazes: new Set(), price: null, em: null }, sort: 'featured', em: 'DXB', bag: {}, turns: [], thumbs: {}, angles: {}, sample: null, busy: false, sent: [], env: { attempts: {}, tickets: [] }, q: '' };
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 const t = () => T[S.lang];
@@ -72,7 +72,7 @@ const tile = (p, i = 0) => `<a class="tile" href="#p-${p.sku}" style="--d:${i * 
 function route() {
   const h = location.hash.slice(1);
   if (h.startsWith('p-') && P(h.slice(2))) return show('product', h.slice(2));
-  if (h.startsWith('shop')) { const k = h.split('-')[1]; if (k && KINDS[k]) { S.f.kinds = new Set([k]); } else if (h === 'shop') S.f.kinds = new Set(); return show('shop'); }
+  if (h.startsWith('shop')) { const k = h.split('-')[1]; if (k && Object.hasOwn(KINDS, k)) { S.f.kinds = new Set([k]); } else if (h === 'shop') S.f.kinds = new Set(); return show('shop'); }
   if (h === 'inbox') return show('inbox');
   show('home');
 }
@@ -189,7 +189,7 @@ function wireHuman() { document.querySelectorAll('[data-human]').forEach(b => b.
 
 function rateOk() {
   const now = Date.now(); S.sent = S.sent.filter(x => now - x < 60000);
-  if (S.turns.length >= 60) return t().cap;
+  if (S.userMsgs >= 40) return t().cap;
   if (S.sent.length >= 8) return t().slow;
   S.sent.push(now); return null;
 }
@@ -197,25 +197,23 @@ function rateOk() {
 async function ask(q) {
   q = String(q).trim().slice(0, 600); if (!q || S.busy) return;
   const limit = rateOk(); if (limit) { bubble('bot', `<p>${esc(limit)}</p><button class="link sm" data-human>${t().human}</button>`); wireHuman(); return; }
-  S.busy = true; $('#q').value = ''; $('#tries').style.display = 'none';
+  S.busy = true; S.userMsgs++; $('#q').value = ''; $('#tries').style.display = 'none';
   bubble('me', `<p>${esc(q)}</p>`);
   const out = bubble('bot', `<p class="wait">${t().thinking}</p>`);
   if (!S.sample) {
     const r = offlineAnswer(q, S.lang);
-    setTimeout(() => { out.innerHTML = renderReply(r.text, groundingCheck(r.text, r.trace), r.handoff); wireHuman(); S.busy = false; $('#msgs').scrollTop = 1e9; }, 300);
+    setTimeout(() => { const g = groundingCheck(r.text, r.trace, q); out.innerHTML = renderReply(redactSpans(r.text, g.spans), g, r.handoff); wireHuman(); S.busy = false; $('#msgs').scrollTop = 1e9; }, 300);
     return;
   }
   const trace = [];
   S.turns.push({ role: 'user', content: q });
+  const steps = { search_products: ['Searching the catalogue', 'البحث في الكتالوج'], get_product: ['Checking a piece', 'التحقق من قطعة'], get_policy: ['Reading the store policy', 'قراءة سياسة المتجر'], get_order_status: ['Verifying the order', 'التحقق من الطلب'], handoff_to_team: ['Opening a request for the team', 'فتح طلب للفريق'] };
+  const tools = conciergeTools(trace, S.env).map(tl => ({ ...tl, execute: (input, c) => { out.querySelector('.wait').textContent = steps[tl.name]?.[S.lang === 'ar' ? 1 : 0] + '…'; return tl.execute(input, c); } }));
   try {
-    const { text } = await S.sample([{ role: 'user', content: conciergeRules(S.lang) }, ...S.turns.slice(-10)], {
-      tools: conciergeTools(trace, S.env),
-      onText: ({ text }) => { out.innerHTML = `<p>${esc(text.replace(/\s*\[RH-[A-Z]{2}-\d{3}\]/g, ''))}</p>`; $('#msgs').scrollTop = 1e9; },
-    });
-    const check = groundingCheck(text, trace);
-    let shown = text;
-    if (check.promises.length) shown = S.lang === 'ar' ? 'لا أستطيع تقديم هذا العرض. يمكنني تحويل طلبك إلى فريق الاستوديو.' : "I can't offer that. I can pass your request to the studio team.";
-    else for (const n of check.badFacts) shown = shown.replace(new RegExp(`(AED\\s?)?\\b${n}\\b(\\s?(درهم|%|٪))?`, 'g'), '…');
+    // Nothing is shown until the full reply has passed the grounding check.
+    const { text } = await S.sample([{ role: 'user', content: conciergeRules(S.lang) }, ...S.turns.slice(-10)], { tools });
+    const check = groundingCheck(text, trace, q);
+    const shown = check.promises.length ? (S.lang === 'ar' ? 'لا أستطيع تقديم هذا العرض. يمكنني تحويل طلبك إلى فريق الاستوديو.' : "I can't offer that. I can pass your request to the studio team.") : redactSpans(text, check.spans);
     out.innerHTML = renderReply(shown, check, check.promises.length || /studio team|فريق الاستوديو/.test(shown));
     wireHuman();
     S.turns.push({ role: 'assistant', content: shown });
