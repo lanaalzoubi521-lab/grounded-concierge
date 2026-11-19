@@ -8,4 +8,8 @@ const app = ['src/catalog.js', 'src/concierge.js', 'src/stage.js', 'src/app.js']
 const html = readFileSync('index.html', 'utf8').replace('/*FONTS*/', () => fonts).replace('/*THREE*/', () => readFileSync('vendor/three.min.js', 'utf8')).replace('/*APP*/', () => app);
 mkdirSync('dist', { recursive: true });
 writeFileSync('dist/index.html', html);
+// Public build (GitHub Pages): locked down with a Content Security Policy. No network access, no remote code.
+const CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'";
+mkdirSync('docs', { recursive: true });
+writeFileSync('docs/index.html', html.replace('<meta charset="utf-8">', `<meta charset="utf-8">\n<meta http-equiv="Content-Security-Policy" content="${CSP}">\n<meta name="referrer" content="no-referrer">`));
 console.log('dist/index.html', (html.length / 1024).toFixed(0) + ' KB');

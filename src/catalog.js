@@ -89,3 +89,26 @@ export function productFacts(p) {
   return { sku: p.sku, name: p.name.en, nameAr: p.name.ar, kind: p.kind, glaze: GLAZES[p.glaze].en, priceAED: p.price, piecesInSet: p.set,
     heightCm: p.h, stockByEmirate: p.stock, description: p.desc.en };
 }
+
+// Demo orders. Status is only released when the order number AND the last four digits
+// of the phone on the order both match.
+export const ORDERS = [
+  { id: 'RH-4101', phone4: '4417', status: 'delivered', emirate: 'DXB', placed: '2026-11-12', eta: '2026-11-13', items: [['RH-VS-101', 1], ['RH-CP-301', 2]] },
+  { id: 'RH-4102', phone4: '9032', status: 'out_for_delivery', emirate: 'AUH', placed: '2026-11-17', eta: '2026-11-19', items: [['RH-BW-201', 1]] },
+  { id: 'RH-4103', phone4: '1188', status: 'processing', emirate: 'SHJ', placed: '2026-11-18', eta: '2026-11-21', items: [['RH-PL-401', 2], ['RH-CH-601', 1]] },
+  { id: 'RH-4104', phone4: '5521', status: 'cancelled', emirate: 'DXB', placed: '2026-11-10', eta: null, items: [['RH-JG-501', 1]] },
+];
+export const ORDER_STATUS = {
+  processing: { en: 'Being packed', ar: 'قيد التجهيز' }, out_for_delivery: { en: 'Out for delivery', ar: 'خرج للتوصيل' },
+  delivered: { en: 'Delivered', ar: 'تم التوصيل' }, cancelled: { en: 'Cancelled', ar: 'ملغي' },
+};
+export function lookupOrder(orderNumber, phone4, attempts) {
+  const id = String(orderNumber || '').toUpperCase().replace(/\s/g, '');
+  const key = id || '_';
+  attempts[key] = (attempts[key] || 0) + 1;
+  if (attempts[key] > 3) return { ok: false, reason: 'too_many_attempts' };
+  const o = ORDERS.find(x => x.id === id && x.phone4 === String(phone4 || '').replace(/\D/g, '').slice(-4));
+  // Same answer whether the order exists or the phone is wrong: no way to probe order numbers.
+  if (!o) return { ok: false, reason: 'not_verified' };
+  return { ok: true, order: { id: o.id, status: o.status, statusText: ORDER_STATUS[o.status].en, emirate: o.emirate, placed: o.placed, expectedDelivery: o.eta, items: o.items.map(([sku, qty]) => ({ sku, qty })) } };
+}

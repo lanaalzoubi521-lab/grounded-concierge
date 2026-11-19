@@ -70,7 +70,27 @@ function contactShadow() {
   return m;
 }
 
+export function hasWebGL() {
+  try { const c = document.createElement('canvas'); return !!(window.WebGLRenderingContext && (c.getContext('webgl2') || c.getContext('webgl'))); } catch { return false; }
+}
+
+// Fallback for devices without WebGL: the same profile, drawn as a shaded silhouette.
+export function silhouette(p, size = 520, bg = '#ECE8E0') {
+  const g = GLAZES[p.glaze], H = p.h, R = Math.max(...p.profile.map(q => q[0]));
+  const sc = Math.min((size * 0.78) / H, (size * 0.42) / R), cx = size / 2, base = size * 0.89;
+  const pts = p.profile.map(([r, y]) => [r * sc, base - y * sc]);
+  const right = pts.map(([x, y]) => `${(cx + x).toFixed(1)},${y.toFixed(1)}`).join(' L');
+  const left = pts.slice().reverse().map(([x, y]) => `${(cx - x).toFixed(1)},${y.toFixed(1)}`).join(' L');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}"><defs><linearGradient id="s" x1="0" x2="1"><stop offset="0" stop-color="${g.color}" stop-opacity=".75"/><stop offset=".35" stop-color="${g.color}"/><stop offset=".7" stop-color="${g.color}" stop-opacity=".85"/><stop offset="1" stop-color="#000" stop-opacity=".35"/></linearGradient><radialGradient id="sh"><stop offset="0" stop-color="#14100c" stop-opacity=".35"/><stop offset="1" stop-color="#14100c" stop-opacity="0"/></radialGradient></defs><rect width="100%" height="100%" fill="${bg}"/><ellipse cx="${cx}" cy="${base + 4}" rx="${R * sc * 1.6}" ry="${R * sc * 0.28}" fill="url(#sh)"/><path d="M${right} L${left} Z" fill="url(#s)"/><path d="M${right} L${left} Z" fill="${g.color}" opacity=".35"/></svg>`;
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+}
+
 export function createStage(canvas, { interactive = false, fit = 1, bg = null, shiftX = 0 } = {}) {
+  if (!hasWebGL()) {
+    const img = document.createElement('img'); img.className = canvas.className; img.alt = '';
+    img.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block'; canvas.replaceWith(img);
+    return { show(p) { img.src = silhouette(p, 520, bg || '#ECE8E0'); img.alt = p.name.en; }, render() {}, resize() {}, play() {}, stop() {}, setAuto() {}, setAngle() {}, snapshot(p) { return silhouette(p, 520, bg || '#ECE8E0'); }, webgl: false };
+  }
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
   renderer.outputEncoding = THREE.sRGBEncoding; renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
@@ -81,7 +101,8 @@ export function createStage(canvas, { interactive = false, fit = 1, bg = null, s
   const cam = new THREE.PerspectiveCamera(26, 1, 0.1, 100);
   const group = new THREE.Group(); scene.add(group);
   const shadow = contactShadow(); scene.add(shadow);
-  let mesh = null, angle = 0.6, vel = 0, dragging = false, lastX = 0, raf = 0, auto = true, tilt = 0.32;
+  const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  let mesh = null, angle = 0.6, vel = 0, dragging = false, lastX = 0, raf = 0, auto = !reduced, tilt = 0.32;
 
   function size() { const w = canvas.clientWidth || 600, h = canvas.clientHeight || 600; renderer.setSize(w, h, false); cam.aspect = w / h; if (shiftX) cam.setViewOffset(w, h, -w * shiftX * (document.documentElement.dir === 'rtl' ? -1 : 1), 0, w, h); else cam.clearViewOffset(); cam.updateProjectionMatrix(); }
   function frame(p) {
@@ -104,11 +125,14 @@ export function createStage(canvas, { interactive = false, fit = 1, bg = null, s
     canvas.addEventListener('pointerdown', e => { dragging = true; lastX = e.clientX; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; });
     canvas.addEventListener('pointermove', e => { if (!dragging) return; const dx = e.clientX - lastX; lastX = e.clientX; angle += dx * 0.01; vel = dx * 0.002; });
     canvas.addEventListener('pointerup', () => { dragging = false; canvas.style.cursor = 'grab'; });
+    canvas.tabIndex = 0;
+    canvas.addEventListener('keydown', e => { if (e.key === 'ArrowLeft') { angle -= 0.3; render(); e.preventDefault(); } if (e.key === 'ArrowRight') { angle += 0.3; render(); e.preventDefault(); } });
   }
   window.addEventListener('resize', () => { size(); render(); });
   if (window.ResizeObserver) new ResizeObserver(() => { size(); render(); }).observe(canvas);
   return {
-    show, render, resize() { size(); render(); },
+    show(p) { show(p); canvas.setAttribute('role', 'img'); canvas.setAttribute('aria-label', `${p.name.en}, 3D view. Use the arrow keys to turn it.`); }, render, resize() { size(); render(); }, webgl: true,
+    setAngle(a) { angle = a; vel = 0; render(); },
     play() { cancelAnimationFrame(raf); loop(); }, stop() { cancelAnimationFrame(raf); },
     setAuto(v) { auto = v; },
     snapshot(p, a = 0.6) { show(p); angle = a; render(); return canvas.toDataURL('image/png'); },

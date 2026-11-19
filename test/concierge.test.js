@@ -38,3 +38,34 @@ test('sold-out product is reported as such', () => {
   const p = PRODUCTS.find(p => p.sku === 'RH-BW-202');
   assert.equal(Object.values(p.stock).reduce((a, b) => a + b, 0), 0);
 });
+
+import { lookupOrder } from '../src/catalog.js';
+test('order status needs the number and the phone digits', () => {
+  const a = {};
+  assert.equal(lookupOrder('RH-4102', '9032', a).ok, true);
+  assert.equal(lookupOrder('RH-4102', '0000', a).reason, 'not_verified');
+  assert.equal(lookupOrder('RH-9999', '9032', a).reason, 'not_verified'); // same answer: cannot probe which orders exist
+});
+test('order lookups are rate limited', () => {
+  const a = {}; for (let i = 0; i < 3; i++) lookupOrder('RH-4103', '0000', a);
+  assert.equal(lookupOrder('RH-4103', '1188', a).reason, 'too_many_attempts');
+});
+test('invented discounts and percentages are flagged', () => {
+  const trace = []; conciergeTools(trace)[1].execute({ sku: 'RH-VS-101' });
+  const g = groundingCheck('Use code SAND for a 20% discount on [RH-VS-101].', trace);
+  assert.ok(g.failed >= 2); assert.ok(g.badFacts.includes(20)); assert.ok(g.promises.length >= 1);
+});
+test('policy wording is not flagged as a promise', () => {
+  const trace = []; conciergeTools(trace)[2].execute({ topic: 'delivery' });
+  assert.equal(groundingCheck('Free delivery on orders over AED 500, otherwise AED 25.', trace).failed, 0);
+});
+test('handoff creates a ticket with bounded fields', () => {
+  const env = { attempts: {}, tickets: [] }, trace = [];
+  const r = conciergeTools(trace, env).find(t => t.name === 'handoff_to_team').execute({ name: 'A'.repeat(500), contact: '050', question: 'custom glaze?' });
+  assert.equal(r.created, true); assert.equal(env.tickets[0].name.length, 80);
+});
+test('offline order flow verifies before answering', () => {
+  assert.match(offlineAnswer('where is my order', 'en').text, /order number/);
+  assert.match(offlineAnswer('order RH-4101 phone 4417', 'en').text, /Delivered/);
+  assert.match(offlineAnswer('order RH-4102 phone 1111', 'en').text, /could not verify/);
+});
