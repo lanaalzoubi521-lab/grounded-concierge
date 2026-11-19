@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raml Home · Grounded Concierge</title>
+<meta name="description" content="A ceramics store whose AI concierge only answers from live catalogue and stock data.">
+<style>
+/*FONTS*/
+:root{--bg:#ECE8E0;--ink:#151412;--mute:#77736C;--line:rgba(21,20,18,.14);--acc:#1F2C8F;--e:cubic-bezier(.2,.7,0,1)}
+*{margin:0;padding:0;box-sizing:border-box}
+html{background:var(--bg)}
+body{font-family:Plex,PlexAr,system-ui,sans-serif;color:var(--ink);font-size:17px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;overflow-x:hidden}
+html[dir=rtl] body{font-family:PlexAr,Plex,system-ui,sans-serif}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit;color:inherit;background:none;border:0}
+button{cursor:pointer}
+canvas{display:block}
+#shot{position:fixed;left:-9999px;top:0;width:520px;height:520px}
+header{position:fixed;inset:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:24px 48px;z-index:20}
+.logo{display:flex;align-items:center;gap:10px;font-weight:500;letter-spacing:.2px}
+.logo svg{width:16px;height:26px}
+.logo path{fill:none;stroke:var(--acc);stroke-width:1.6;stroke-linecap:round}
+nav{display:flex;gap:30px;font-size:15px;align-items:center}
+nav a,nav button{color:var(--mute);transition:color .3s}
+nav a.on,nav a:hover,nav button:hover{color:var(--ink)}
+#langbtn{font-family:PlexAr,Plex;color:var(--ink)}
+html[dir=rtl] #langbtn{font-family:Plex}
+.view{display:none;min-height:100vh}
+.view.on{display:block;animation:in .8s var(--e) both}
+.view.out{animation:out .42s var(--e) both}
+@keyframes in{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+@keyframes out{to{opacity:0;transform:translateY(-20px)}}
+.k{font-size:14px;color:var(--mute);letter-spacing:.3px}
+html[dir=rtl] .k{letter-spacing:0}
+/* home */
+#v-home{position:relative;height:100vh;min-height:640px;overflow:hidden}
+#hero{position:absolute;inset:0;width:100%;height:100%}
+.htext{position:absolute;inset-inline-start:48px;bottom:9vh;max-width:620px;z-index:2;pointer-events:none}
+.htext *{pointer-events:auto}
+h1{font-weight:500;font-size:clamp(46px,6.2vw,98px);line-height:1;letter-spacing:-.025em;margin-top:18px}
+html[dir=rtl] h1{letter-spacing:0;line-height:1.15}
+h1 span{display:block}
+h1 span+span{color:var(--acc)}
+.sub{font-size:20px;font-weight:300;line-height:1.45;color:#3B3934;max-width:34ch;margin-top:26px}
+.ctas{display:flex;gap:36px;margin-top:38px;font-size:17px}
+.ctas a{border-bottom:1px solid var(--ink);padding-bottom:6px;transition:color .3s,border-color .3s}
+.ctas a:hover{color:var(--acc);border-color:var(--acc)}
+#hero-prof{position:absolute;top:50%;inset-inline-end:4vw;transform:translateY(-50%);z-index:2}
+.prof path{fill:none;stroke:var(--acc);stroke-width:1.2;stroke-linecap:round;stroke-linejoin:round}
+html[dir=rtl] #hero-prof svg,html[dir=rtl] #pd-prof svg{transform:scaleX(-1)}
+.prof.draw path{stroke-dasharray:1;stroke-dashoffset:1;animation:draw 2.4s .3s var(--e) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.cap{position:absolute;inset-inline-end:4vw;bottom:9vh;font-size:13px;color:var(--mute);text-align:end;z-index:2;line-height:1.6}
+/* collection */
+.wrap{padding:130px 48px 80px;max-width:1440px;margin:0 auto}
+.chead{display:flex;justify-content:space-between;align-items:end;gap:30px;flex-wrap:wrap;border-bottom:1px solid var(--ink);padding-bottom:22px}
+h2{font-size:clamp(38px,4.6vw,68px);font-weight:500;letter-spacing:-.02em;line-height:1.02}
+html[dir=rtl] h2{letter-spacing:0;line-height:1.2}
+#kinds{display:flex;gap:22px;flex-wrap:wrap;font-size:15px}
+#kinds button{color:var(--mute)}#kinds button.on{color:var(--ink)}
+#grid{display:grid;grid-template-columns:repeat(4,1fr);gap:56px 32px;margin-top:48px}
+.tile{display:block;animation:in .9s var(--e) both;animation-delay:var(--d)}
+.tile .img{position:relative;aspect-ratio:1}
+.tile img{width:100%;height:100%;object-fit:contain;transition:transform .8s var(--e)}
+.tile:hover img{transform:scale(1.04) translateY(-6px)}
+.tile .tp{position:absolute;top:8%;inset-inline-end:2%;opacity:0;transition:opacity .4s}
+.tile .tp path{stroke-dasharray:1;stroke-dashoffset:1;transition:stroke-dashoffset 1.2s var(--e)}
+.tile:hover .tp{opacity:1}.tile:hover .tp path{stroke-dashoffset:0}
+.meta{display:flex;justify-content:space-between;gap:12px;margin-top:10px;border-top:1px solid var(--line);padding-top:14px}
+.meta b{font-weight:500}
+.meta span{white-space:nowrap}
+.st{font-size:14px;color:var(--mute);margin-top:4px}
+.so{color:#9A4A2E}
+/* product */
+#v-product .pgrid{display:grid;grid-template-columns:1.25fr 1fr;min-height:100vh}
+#big{width:100%;height:100vh;position:sticky;top:0}
+.pinfo{padding:110px 48px 60px;display:flex;flex-direction:column;justify-content:center;gap:0;max-width:560px}
+.back{font-size:14px;color:var(--mute);margin-bottom:40px}
+.back:hover{color:var(--ink)}
+#pd-name{margin-top:14px}
+.prow{display:flex;justify-content:space-between;align-items:baseline;margin-top:20px}
+#pd-price{font-size:26px;font-weight:500}
+#pd-spec{font-size:14px;color:var(--mute)}
+#pd-desc{font-size:18px;line-height:1.55;color:#3B3934;margin-top:24px;font-weight:300}
+.pprof{display:flex;gap:18px;align-items:end;margin-top:22px}
+.pprof .k{max-width:20ch}
+dl{margin-top:28px;border-top:1px solid var(--ink)}
+dl .k{padding:14px 0 4px}
+dl div{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--line)}
+dd{font-weight:500}dd.z{color:var(--mute)}
+.asof{font-size:13px;color:var(--mute);margin-top:12px}
+.pbtns{display:flex;gap:26px;align-items:center;margin-top:30px;flex-wrap:wrap}
+.primary{background:var(--ink);color:var(--bg);padding:16px 30px;font-size:16px;transition:background .3s,transform .4s var(--e)}
+.primary:hover:not(:disabled){background:var(--acc);transform:translateY(-2px)}
+.primary:disabled{opacity:.35;cursor:default}
+.link{border-bottom:1px solid var(--ink);padding-bottom:4px}
+.link:hover{color:var(--acc);border-color:var(--acc)}
+/* drawers */
+.drawer{position:fixed;top:0;bottom:0;inset-inline-end:0;width:min(460px,100vw);background:#F6F3EC;z-index:30;transform:translateX(105%);transition:transform .7s var(--e);display:flex;flex-direction:column;box-shadow:0 0 0 1px var(--line)}
+html[dir=rtl] .drawer{transform:translateX(-105%)}
+.chat-open #chat,.bag-open #bag{transform:none}
+.dh{display:flex;justify-content:space-between;align-items:center;padding:26px 30px;border-bottom:1px solid var(--line)}
+.dh b{font-weight:500}
+.dh button{font-size:14px;color:var(--mute)}
+#msgs{list-style:none;flex:1;overflow:auto;padding:26px 30px;display:flex;flex-direction:column;gap:20px}
+#msgs li{max-width:92%;animation:in .5s var(--e) both}
+#msgs .me{align-self:flex-end;background:var(--ink);color:var(--bg);padding:12px 16px}
+#msgs .bot p{line-height:1.6}
+.wait{color:var(--mute)}
+.card{display:flex;gap:14px;align-items:center;margin-top:12px;padding:10px 0;border-top:1px solid var(--line);font-size:14px;color:var(--mute)}
+.card img{width:64px;height:64px;object-fit:contain;background:var(--bg)}
+.card b{display:block;color:var(--ink);font-weight:500;font-size:15px}
+.card:hover b{color:var(--acc)}
+.g{display:block;font-style:normal;font-size:12px;color:var(--mute);margin-top:10px}
+.g.warn{color:#9A4A2E}
+#tries{display:flex;flex-direction:column;align-items:flex-start;gap:8px;padding:0 30px 16px;font-size:14px}
+#tries button{color:var(--mute);text-align:start}#tries button:hover{color:var(--ink)}
+#form{display:flex;border-top:1px solid var(--ink);margin:0 30px 14px}
+#q{flex:1;padding:18px 0;font-size:16px;outline:none}
+#form button{color:var(--acc);font-weight:500}
+#mode{font-size:12px;color:var(--mute);padding:0 30px 20px;min-height:20px}
+#bag-list{list-style:none;flex:1;overflow:auto;padding:10px 30px}
+#bag-list li{display:grid;grid-template-columns:56px 1fr auto;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line);font-size:15px}
+#bag-list img{width:56px;height:56px;object-fit:contain;background:var(--bg)}
+#bag-list .e{display:block;color:var(--mute);border:0}
+.btot{padding:22px 30px;border-top:1px solid var(--ink);display:flex;justify-content:space-between;font-weight:500}
+.bnote{padding:0 30px 26px;font-size:13px;color:var(--mute)}
+footer{font-size:13px;color:var(--mute);padding:0 48px 36px;display:flex;justify-content:space-between;gap:20px;max-width:1440px;margin:0 auto}
+@media(max-width:900px){
+  header{padding:16px 20px}nav{gap:16px;font-size:14px}.navc{display:none}
+  #v-home{height:auto;min-height:100vh}
+  #hero{position:relative;inset:auto;width:100%;height:58vh;margin-top:64px}
+  html[dir=rtl] #hero{inset:auto}
+  .htext{position:relative;inset:auto;padding:0 20px 50px}
+  #hero-prof,.cap{display:none}
+  .sub{font-size:18px}
+  .wrap{padding:96px 20px 60px}
+  #grid{grid-template-columns:repeat(2,1fr);gap:36px 16px}
+  .meta{flex-direction:column;gap:2px}
+  #v-product .pgrid{grid-template-columns:1fr}
+  #big{position:relative;height:56vh;margin-top:60px}
+  .pinfo{padding:10px 20px 60px}
+  footer{padding:0 20px 30px;flex-direction:column}
+}
+</style>
+</head>
+<body>
+<canvas id="shot"></canvas>
+<header>
+  <a class="logo" href="#"><svg viewBox="0 0 16 26"><path d="M8 25 C3 24 1 19 2 14 C3 9 7 7 6 3 L7 1"/></svg>Raml Home</a>
+  <nav>
+    <a href="#collection" data-nav="collection" data-t="shop"></a>
+    <a href="#" data-chat class="navc" data-t="ask"></a>
+    <button id="bagbtn"><span data-t="bag"></span> (<span id="bagn">0</span>)</button>
+    <button id="langbtn" data-t="lang"></button>
+  </nav>
+</header>
+
+<section class="view" id="v-home">
+  <canvas id="hero"></canvas>
+  <div class="htext">
+    <div class="k" data-t="kicker"></div>
+    <h1><span data-t="h1a"></span><span data-t="h1b"></span></h1>
+    <p class="sub" data-t="sub"></p>
+    <div class="ctas"><a href="#collection" data-t="cta1"></a><a href="#" data-chat data-t="cta2"></a></div>
+  </div>
+  <div id="hero-prof"></div>
+  <div class="cap">RH-VS-102</div>
+</section>
+
+<section class="view" id="v-collection">
+  <div class="wrap">
+    <div class="chead"><h2 data-t="shop"></h2><div id="kinds"></div></div>
+    <div id="grid"></div>
+  </div>
+  <footer><span data-t="demo"></span><span>Built by Lana Alzoubi · lanaalzoubi.com</span></footer>
+</section>
+
+<section class="view" id="v-product">
+  <div class="pgrid">
+    <canvas id="big"></canvas>
+    <div class="pinfo">
+      <a class="back" href="#collection">← <span data-t="shop"></span></a>
+      <div class="k" id="pd-kind"></div>
+      <h2 id="pd-name"></h2>
+      <div class="prow"><span id="pd-price"></span><span id="pd-spec"></span></div>
+      <p id="pd-desc"></p>
+      <div class="pprof"><div id="pd-prof"></div><div class="k" data-t="profile"></div></div>
+      <dl><div class="k" data-t="stockBy" style="border:0;display:block"></div><span id="pd-stock" style="display:contents"></span></dl>
+      <div class="asof" data-t="asOf"></div>
+      <div class="pbtns"><button class="primary" id="pd-add"></button><button class="link" id="pd-ask" data-t="askThis"></button></div>
+    </div>
+  </div>
+</section>
+
+<aside class="drawer" id="chat">
+  <div class="dh"><b data-t="ask"></b><button id="chat-x" data-t="close"></button></div>
+  <ul id="msgs"></ul>
+  <div id="tries"></div>
+  <form id="form"><input id="q" autocomplete="off"><button data-t="send"></button></form>
+  <div id="mode"></div>
+</aside>
+
+<aside class="drawer" id="bag">
+  <div class="dh"><b data-t="bag"></b><button id="bag-x" data-t="close"></button></div>
+  <ul id="bag-list"></ul>
+  <div class="btot"><span data-t="total"></span><span id="bag-total"></span></div>
+  <div class="bnote" data-t="checkout"></div>
+</aside>
+<script>
+/*THREE*/
+</script>
+<script>
+/*APP*/
+</script>
+</body>
+</html>
