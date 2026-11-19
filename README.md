@@ -2,6 +2,10 @@
 
 **A bilingual ceramics store whose AI concierge can only say what the live catalogue says, and proves it on every reply.**
 
+[![Live demo](https://img.shields.io/badge/live_demo-open-B4532A?style=flat-square)](https://lanaalzoubi521-lab.github.io/grounded-concierge/) [![Tests](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml/badge.svg)](https://github.com/lanaalzoubi521-lab/grounded-concierge/actions/workflows/test.yml) ![License: MIT](https://img.shields.io/badge/license-MIT-555?style=flat-square) ![Node 18+](https://img.shields.io/badge/node-18%2B-555?style=flat-square) ![Zero dependencies](https://img.shields.io/badge/dependencies-0-555?style=flat-square)
+
+**[Open the live demo →](https://lanaalzoubi521-lab.github.io/grounded-concierge/)** A working store in English and Arabic. Nothing to install.
+
 Shopping assistants that make up a price or promise stock that does not exist cost more than they save. This project shows the other way: the assistant is connected to the store's real data through tools, it is told to state nothing it did not look up, and then the page checks its answer. Every price, stock count and SKU in a reply is matched against the tool results from that same turn. Anything that does not match is hidden and the reply says so.
 
 ![Home](docs/home.png)
@@ -19,7 +23,7 @@ Shopping assistants that make up a price or promise stock that does not exist co
 
 ## The concierge
 
-Inside Claude, the concierge runs on the viewer's own Claude account with five tools:
+With a language model connected (the hosted version runs on Claude, on the viewer's own account), the concierge has five tools:
 
 | Tool | What it does |
 |---|---|
@@ -33,7 +37,26 @@ Inside Claude, the concierge runs on the viewer's own Claude account with five t
 
 **Handoff.** When the concierge cannot help, or a customer asks for a person, it collects a name, contact and question and opens a request. The demo shows these in a Studio inbox; in production they would go to a CRM or WhatsApp.
 
-Outside Claude (for example on GitHub Pages) the page uses a catalogue search mode with the same retrieval, order verification and grounding check, without a language model. See [SECURITY.md](SECURITY.md) for how the concierge is protected.
+The public demo on GitHub Pages runs without a model: it uses catalogue search with the same retrieval, order verification and grounding check, without a language model. See [SECURITY.md](SECURITY.md) for how the concierge is protected.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+    Q[Customer question<br/>English or Arabic] --> M[Language model<br/>with 5 store tools]
+    M --> T[Tool results<br/>catalogue, stock, policy, orders]
+    T --> M
+    M --> DR[Draft reply]
+    DR --> G{Grounding check<br/>every price, stock, size,<br/>SKU and promise}
+    T --> G
+    G -- matches --> S[Shown to customer<br/>with facts checked count]
+    G -- does not match --> X[Detail removed<br/>and flagged]
+    M --> H[Handoff to team<br/>Studio inbox]
+```
+
+## Built with
+
+Vanilla JavaScript (ES modules) · three.js (lathe geometry from profile curves, PBR glazes) · LLM tool calling · bilingual RTL layout · `node:test` · GitHub Actions CI
 
 ## Run it
 

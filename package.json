@@ -1,1 +1,33 @@
-{"name":"grounded-concierge","version":"1.0.0","type":"module","scripts":{"test":"node --test test/*.test.js","build":"node scripts/build.js"},"license":"MIT"}
+{
+  "name": "grounded-concierge",
+  "version": "1.0.0",
+  "description": "Bilingual 3D ceramics store with an AI concierge that cannot invent facts: every price, stock level and policy in a reply is checked against the catalogue first.",
+  "keywords": [
+    "ai-agent",
+    "llm",
+    "grounding",
+    "hallucination",
+    "e-commerce",
+    "arabic",
+    "rtl",
+    "threejs"
+  ],
+  "homepage": "https://lanaalzoubi521-lab.github.io/grounded-concierge/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lanaalzoubi521-lab/grounded-concierge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lanaalzoubi521-lab/grounded-concierge/issues"
+  },
+  "author": "Lana Alzoubi (https://lanaalzoubi.com)",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "build": "node scripts/build.js"
+  }
+}
